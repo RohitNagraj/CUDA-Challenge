@@ -14,42 +14,49 @@ __global__ void transform(float *arr, float *output, float *sum)
 
     if (i < N)
     {
-        if ((i % 4 == 0) && (i % 32 < 16))
+        float val = arr[i];
+        float result;
+
+        // First level of divergence: half-warp vs half-warp
+        if (i % 32 < 16)
         {
-            output[i] = sinf(arr[i]);
-        }
-        else if ((i % 4 == 1) && (i % 32 < 16))
-        {
-            {
-                output[i] = cosf(arr[i]);
-                if (output[i] > 0.5)
-                    atomicAdd(sum, output[i]);
+            // These independent 'if's can be predicated
+            if (i % 4 == 0) {
+                result = sinf(val);
+            }
+            if (i % 4 == 1) {
+                result = cosf(val);
+                // The atomic operation is also predicated
+                if (result > 0.5f) {
+                    atomicAdd(sum, result);
+                }
+            }
+            if (i % 4 == 2) {
+                result = logf(val);
+            }
+            if (i % 4 == 3) {
+                result = expf(val);
             }
         }
-        else if ((i % 4 == 2) && (i % 32 < 16))
+        else // i % 32 >= 16
         {
-            output[i] = logf(arr[i]);
+            float prev_val = arr[i - 16];
+            // These independent 'if's can also be predicated
+            if (i % 4 == 0) {
+                result = sinf(val) * sinf(prev_val);
+            }
+            if (i % 4 == 1) {
+                result = cosf(val) * cosf(prev_val);
+            }
+            if (i % 4 == 2) {
+                result = logf(val) * logf(prev_val);
+            }
+            if (i % 4 == 3) {
+                result = expf(val) * expf(prev_val);
+            }
         }
-        else if ((i % 4 == 3) && (i % 32 < 16))
-        {
-            output[i] = expf(arr[i]);
-        }
-        else if ((i % 4 == 0) && (i % 32 >= 16))
-        {
-            output[i] = sinf(arr[i]) * sinf(arr[i - 16]);
-        }
-        else if ((i % 4 == 1) && (i % 32 >= 16))
-        {
-            output[i] = cosf(arr[i]) * cosf(arr[i - 16]);
-        }
-        else if ((i % 4 == 2) && (i % 32 >= 16))
-        {
-            output[i] = logf(arr[i]) * logf(arr[i - 16]);
-        }
-        else if ((i % 4 == 3) && (i % 32 >= 16))
-        {
-            output[i] = expf(arr[i]) * expf(arr[i - 16]);
-        }
+        
+        output[i] = result;
     }
 }
 

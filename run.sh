@@ -1,7 +1,9 @@
-nvcc -o 1_naive 1_naive.cu
+PROGRAM=2_naive
+
+nvcc -o $PROGRAM $PROGRAM.cu
 echo "Run 1:"
-./1_naive
+./$PROGRAM
 echo "Run 2:"
-./1_naive
+./$PROGRAM
 echo "Run 3:"
-./1_naive
+./$PROGRAM
