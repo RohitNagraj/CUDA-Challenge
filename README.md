@@ -25,7 +25,7 @@ do not rely on profilers to report times.
 For bonus points repeat for the bfloat16 data type (__nv_bfloat16).
 
 ## Challenges
-1. Uncoalesced memory access
-2. Warp divergence
-3. Bank conflicts maybe?
-4. Atomic add precision (need to accumulate in higher precision)
+1. Bank conflicts maybe?
+2. Atomic add precision -> Solved with reduction in higher precision
+3. Memory coalescing -> Already coalesced.
+4. Reduction is making the code 3x slower

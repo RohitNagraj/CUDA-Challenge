@@ -2,61 +2,30 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#define N 100'000'000
-// #define N 32
+#define N (1 << 27)
 #define BLOCK_SIZE 32
 #define N_STREAMS 1
 #define DELTA 0.000001
 
-__global__ void transform(float *arr, float *output, float *sum)
+__global__ void transform(float *arr, float *output, double *sum)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i < N)
     {
-        float val = arr[i];
-        float result;
+        float xi = arr[i];
+        float ximinus16 = arr[i - 16]; // assumed valid when used
+        int mod4 = (i & 3);
+        bool first_block = ((i & 31) < 16);
 
-        // First level of divergence: half-warp vs half-warp
-        if (i % 32 < 16)
-        {
-            // These independent 'if's can be predicated
-            if (i % 4 == 0) {
-                result = sinf(val);
-            }
-            if (i % 4 == 1) {
-                result = cosf(val);
-                // The atomic operation is also predicated
-                if (result > 0.5f) {
-                    atomicAdd(sum, result);
-                }
-            }
-            if (i % 4 == 2) {
-                result = logf(val);
-            }
-            if (i % 4 == 3) {
-                result = expf(val);
-            }
-        }
-        else // i % 32 >= 16
-        {
-            float prev_val = arr[i - 16];
-            // These independent 'if's can also be predicated
-            if (i % 4 == 0) {
-                result = sinf(val) * sinf(prev_val);
-            }
-            if (i % 4 == 1) {
-                result = cosf(val) * cosf(prev_val);
-            }
-            if (i % 4 == 2) {
-                result = logf(val) * logf(prev_val);
-            }
-            if (i % 4 == 3) {
-                result = expf(val) * expf(prev_val);
-            }
-        }
-        
-        output[i] = result;
+        output[i] =
+            (mod4 == 0) ? (first_block ? sinf(xi) : sinf(xi) * sinf(ximinus16)) : (mod4 == 1) ? (first_block ? cosf(xi) : cosf(xi) * cosf(ximinus16))
+                                                                              : (mod4 == 2)   ? (first_block ? logf(xi) : logf(xi) * logf(ximinus16))
+                                                                                              : (first_block ? expf(xi) : expf(xi) * expf(ximinus16));
+
+        __syncthreads();
+        if ((i % 4 == 1) && (output[i] > 0.5))
+            atomicAdd(sum, (double)output[i - 1]);
     }
 }
 
@@ -70,8 +39,10 @@ int main()
 {
 
     srand(12345);
-    float *h_arr, *h_output, h_sum = 0.0;
-    float *d_arr, *d_output, *d_sum;
+    float *h_arr, *h_output;
+    double h_sum = 0.0;
+    float *d_arr, *d_output;
+    double *d_sum;
     int i;
     float elapsedTimeBaseline, elapsedTime;
 
@@ -87,7 +58,7 @@ int main()
 
     cudaMalloc(&d_arr, N * sizeof(float));
     cudaMalloc(&d_output, N * sizeof(float));
-    cudaMalloc(&d_sum, sizeof(float));
+    cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
     {
@@ -116,7 +87,7 @@ int main()
     cudaEventSynchronize(stop);
 
     cudaMemcpy(h_output, d_output, N * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&h_sum, d_sum, sizeof(double), cudaMemcpyDeviceToHost);
 
     cudaEventElapsedTime(&elapsedTimeBaseline, startBaseline, stopBaseline);
     printf("Baseline execution time: %.3f ms\n", elapsedTimeBaseline);
@@ -198,7 +169,9 @@ int main()
         printf("CORRECTNESS TEST FAILED!\n");
     else
         printf("Correctness Tests Passed!\n");
-    printf("Sum of Sin: %f\n", h_sum);
+    printf("Sum of Sin: %f\n", (float)h_sum);
+
+    printf("speed: %f%%\n", (elapsedTimeBaseline / elapsedTime) * 100);
 
     cudaFreeHost(h_arr);
     cudaFreeHost(h_output);

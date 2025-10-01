@@ -2,13 +2,12 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#define N 100'000'000
-// #define N 32
+#define N (1 << 27)
 #define BLOCK_SIZE 32
 #define N_STREAMS 1
 #define DELTA 0.000001
 
-__global__ void transform(float *arr, float *output, float *sum)
+__global__ void transform(float *arr, float *output, double *sum)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -20,11 +19,7 @@ __global__ void transform(float *arr, float *output, float *sum)
         }
         else if ((i % 4 == 1) && (i % 32 < 16))
         {
-            {
-                output[i] = cosf(arr[i]);
-                if (output[i] > 0.5)
-                    atomicAdd(sum, output[i]);
-            }
+            output[i] = cosf(arr[i]);
         }
         else if ((i % 4 == 2) && (i % 32 < 16))
         {
@@ -50,6 +45,10 @@ __global__ void transform(float *arr, float *output, float *sum)
         {
             output[i] = expf(arr[i]) * expf(arr[i - 16]);
         }
+
+        __syncthreads();
+        if ((i % 4 == 1) && (output[i] > 0.5))
+            atomicAdd(sum, (double)output[i-1]);
     }
 }
 
@@ -63,8 +62,10 @@ int main()
 {
 
     srand(12345);
-    float *h_arr, *h_output, h_sum = 0.0;
-    float *d_arr, *d_output, *d_sum;
+    float *h_arr, *h_output;
+    double h_sum = 0.0;
+    float *d_arr, *d_output;
+    double *d_sum;
     int i;
     float elapsedTimeBaseline, elapsedTime;
 
@@ -80,7 +81,7 @@ int main()
 
     cudaMalloc(&d_arr, N * sizeof(float));
     cudaMalloc(&d_output, N * sizeof(float));
-    cudaMalloc(&d_sum, sizeof(float));
+    cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
     {
@@ -109,7 +110,7 @@ int main()
     cudaEventSynchronize(stop);
 
     cudaMemcpy(h_output, d_output, N * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&h_sum, d_sum, sizeof(double), cudaMemcpyDeviceToHost);
 
     cudaEventElapsedTime(&elapsedTimeBaseline, startBaseline, stopBaseline);
     printf("Baseline execution time: %.3f ms\n", elapsedTimeBaseline);
@@ -191,7 +192,9 @@ int main()
         printf("CORRECTNESS TEST FAILED!\n");
     else
         printf("Correctness Tests Passed!\n");
-    printf("Sum of Sin: %f\n", h_sum);
+    printf("Sum of Sin: %f\n", (float)h_sum);
+
+    printf("speed: %f%%\n", (elapsedTimeBaseline / elapsedTime) * 100);
 
     cudaFreeHost(h_arr);
     cudaFreeHost(h_output);
