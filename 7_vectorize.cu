@@ -3,29 +3,91 @@
 #include <cuda_runtime.h>
 
 #define N (1 << 27)
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 256
 #define BLOCK_SIZE_BASELINE 256
 #define DELTA 0.0001
 
 __global__ void transform(float *arr, float *output, double *sum)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = tid * 4; // Each thread processes 4 elements
 
-    if (i < N)
+    double thread_sum = 0.0;
+    __shared__ double warp_sums[BLOCK_SIZE / 32];
+
+    if (i + 3 < N)
     {
-        float xi = arr[i];
-        float ximinus16 = arr[i - 16]; // assumed valid when used
-        int mod4 = (i & 3);
-        bool first_block = ((i & 31) < 16);
+        // Load 4 floats at once using float4
+        float4 xi_vec = *reinterpret_cast<float4 *>(&arr[i]);
+        float4 output_vec;
 
-        output[i] =
-            (mod4 == 0) ? (first_block ? sinf(xi) : sinf(xi) * sinf(ximinus16)) : (mod4 == 1) ? (first_block ? cosf(xi) : cosf(xi) * cosf(ximinus16))
-                                                                              : (mod4 == 2)   ? (first_block ? logf(xi) : logf(xi) * logf(ximinus16))
-                                                                                              : (first_block ? expf(xi) : expf(xi) * expf(ximinus16));
+        for (int j = 0; j < 4; j++)
+        {
+            int idx = i + j;
+            float xi = ((float *)&xi_vec)[j];
+            int mod4 = (idx & 3);
+            bool first_block = ((idx & 31) < 16);
 
-        __syncthreads();
-        if ((i % 4 == 1) && (output[i] > 0.5))
-            atomicAdd(sum, (double)output[i - 1]);
+            float result;
+            if (first_block)
+            {
+                if (mod4 == 0)
+                    result = sinf(xi);
+                else if (mod4 == 1)
+                    result = cosf(xi);
+                else if (mod4 == 2)
+                    result = logf(xi);
+                else
+                    result = expf(xi);
+            }
+            else
+            {
+                float ximinus16 = arr[idx - 16];
+                if (mod4 == 0)
+                    result = sinf(xi) * sinf(ximinus16);
+                else if (mod4 == 1)
+                    result = cosf(xi) * cosf(ximinus16);
+                else if (mod4 == 2)
+                    result = logf(xi) * logf(ximinus16);
+                else
+                    result = expf(xi) * expf(ximinus16);
+            }
+
+            ((float *)&output_vec)[j] = result;
+
+            // Accumulate for sum (when idx % 4 == 1 and result > 0.5)
+            if ((idx % 4 == 1) && (result > 0.5))
+            {
+                // Need to get output[idx - 1]
+                if (j > 0)
+                    thread_sum += (double)((float *)&output_vec)[j - 1];
+                else if (idx > 0)
+                    thread_sum += (double)output[idx - 1];
+            }
+        }
+
+        // Store 4 floats at once using float4
+        *reinterpret_cast<float4 *>(&output[i]) = output_vec;
+    }
+
+    // Reduce within warp
+    for (int offset = 16; offset > 0; offset /= 2)
+        thread_sum += __shfl_down_sync(0xffffffff, thread_sum, offset);
+
+    // First thread of each warp writes to shared memory
+    int warp_id = threadIdx.x / 32;
+    if (threadIdx.x % 32 == 0)
+        warp_sums[warp_id] = thread_sum;
+
+    __syncthreads();
+
+    // First warp reduces the warp sums
+    if (threadIdx.x == 0)
+    {
+        double block_sum = 0.0;
+        for (int j = 0; j < BLOCK_SIZE / 32; j++)
+            block_sum += warp_sums[j];
+        atomicAdd(sum, block_sum);
     }
 }
 
@@ -37,7 +99,6 @@ __global__ void baseline(float *arr, float *output)
 
 int main()
 {
-
     srand(12345);
     float *h_arr, *h_output;
     double h_sum = 0.0;
@@ -61,13 +122,16 @@ int main()
     cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
+    {
         h_arr[i] = (float)rand() / RAND_MAX * 5.0f;
+    }
 
-    dim3 grid(N / BLOCK_SIZE);
+    // Each thread processes 4 elements, so divide grid size by 4
+    dim3 grid(N / (BLOCK_SIZE * 4));
     dim3 block(BLOCK_SIZE);
 
     cudaMemcpy(d_arr, h_arr, N * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_sum, &h_sum, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_sum, &h_sum, sizeof(double), cudaMemcpyHostToDevice);
 
     // Warm-up
     baseline<<<N / BLOCK_SIZE_BASELINE, BLOCK_SIZE_BASELINE>>>(d_arr, d_output);

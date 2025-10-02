@@ -3,13 +3,17 @@
 #include <cuda_runtime.h>
 
 #define N (1 << 27)
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 256
 #define BLOCK_SIZE_BASELINE 256
 #define DELTA 0.0001
 
 __global__ void transform(float *arr, float *output, double *sum)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    __shared__ double local_sum[BLOCK_SIZE / 4];
+
+    if (threadIdx.x < BLOCK_SIZE / 4)
+        local_sum[threadIdx.x] = 0.0;
 
     if (i < N)
     {
@@ -22,10 +26,23 @@ __global__ void transform(float *arr, float *output, double *sum)
             (mod4 == 0) ? (first_block ? sinf(xi) : sinf(xi) * sinf(ximinus16)) : (mod4 == 1) ? (first_block ? cosf(xi) : cosf(xi) * cosf(ximinus16))
                                                                               : (mod4 == 2)   ? (first_block ? logf(xi) : logf(xi) * logf(ximinus16))
                                                                                               : (first_block ? expf(xi) : expf(xi) * expf(ximinus16));
-
         __syncthreads();
         if ((i % 4 == 1) && (output[i] > 0.5))
-            atomicAdd(sum, (double)output[i - 1]);
+        {
+            int local_idx = (threadIdx.x - 1) / 4;
+            local_sum[local_idx] = (double)output[i - 1];
+        }
+        __syncthreads();
+
+        for (unsigned int s = BLOCK_SIZE / 8; s > 0; s >>= 1)
+        {
+            if (threadIdx.x < s)
+                local_sum[threadIdx.x] += local_sum[threadIdx.x + s];
+            __syncthreads();
+        }
+
+        if (threadIdx.x == 0)
+            atomicAdd(sum, local_sum[0]);
     }
 }
 
@@ -61,9 +78,11 @@ int main()
     cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
+    {
         h_arr[i] = (float)rand() / RAND_MAX * 5.0f;
+    }
 
-    dim3 grid(N / BLOCK_SIZE);
+    dim3 grid(N / (BLOCK_SIZE));
     dim3 block(BLOCK_SIZE);
 
     cudaMemcpy(d_arr, h_arr, N * sizeof(float), cudaMemcpyHostToDevice);

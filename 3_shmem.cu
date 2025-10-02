@@ -10,6 +10,10 @@
 __global__ void transform(float *arr, float *output, double *sum)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    __shared__ double local_sum[8];
+
+    if (threadIdx.x < 8)
+        local_sum[threadIdx.x] = 0.0;
 
     if (i < N)
     {
@@ -22,10 +26,21 @@ __global__ void transform(float *arr, float *output, double *sum)
             (mod4 == 0) ? (first_block ? sinf(xi) : sinf(xi) * sinf(ximinus16)) : (mod4 == 1) ? (first_block ? cosf(xi) : cosf(xi) * cosf(ximinus16))
                                                                               : (mod4 == 2)   ? (first_block ? logf(xi) : logf(xi) * logf(ximinus16))
                                                                                               : (first_block ? expf(xi) : expf(xi) * expf(ximinus16));
-
         __syncthreads();
         if ((i % 4 == 1) && (output[i] > 0.5))
-            atomicAdd(sum, (double)output[i - 1]);
+        {
+            int local_idx = (threadIdx.x - 1) / 4;
+            local_sum[local_idx] = (double)output[i - 1];
+        }
+        __syncthreads();
+
+        if (threadIdx.x == 0)
+        {
+            double lsum = 0.0;
+            for (int j = 0; j < 8; j++)
+                lsum = lsum + local_sum[j];
+            atomicAdd(sum, lsum);
+        }
     }
 }
 
@@ -61,7 +76,9 @@ int main()
     cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
+    {
         h_arr[i] = (float)rand() / RAND_MAX * 5.0f;
+    }
 
     dim3 grid(N / BLOCK_SIZE);
     dim3 block(BLOCK_SIZE);
@@ -86,7 +103,7 @@ int main()
     cudaMemcpy(h_output, d_output, N * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(&h_sum, d_sum, sizeof(double), cudaMemcpyDeviceToHost);
 
-    // Correctness Testing
+   // Correctness Testing
     bool correct = true;
 
     for (int i = 0; i < 64; i++)

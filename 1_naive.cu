@@ -72,7 +72,6 @@ int main()
     dim3 grid(N / BLOCK_SIZE);
     dim3 block(BLOCK_SIZE);
 
-    // Host to Device Memcpy
     cudaMemcpy(d_arr, h_arr, N * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_sum, &h_sum, sizeof(float), cudaMemcpyHostToDevice);
 

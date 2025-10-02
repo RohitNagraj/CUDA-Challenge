@@ -3,18 +3,20 @@
 #include <cuda_runtime.h>
 
 #define N (1 << 27)
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 256
 #define BLOCK_SIZE_BASELINE 256
 #define DELTA 0.0001
 
 __global__ void transform(float *arr, float *output, double *sum)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    double thread_sum = 0.0;
+    __shared__ double warp_sums[BLOCK_SIZE / 32];
 
     if (i < N)
     {
         float xi = arr[i];
-        float ximinus16 = arr[i - 16]; // assumed valid when used
+        float ximinus16 = arr[i - 16];
         int mod4 = (i & 3);
         bool first_block = ((i & 31) < 16);
 
@@ -23,9 +25,28 @@ __global__ void transform(float *arr, float *output, double *sum)
                                                                               : (mod4 == 2)   ? (first_block ? logf(xi) : logf(xi) * logf(ximinus16))
                                                                                               : (first_block ? expf(xi) : expf(xi) * expf(ximinus16));
 
-        __syncthreads();
         if ((i % 4 == 1) && (output[i] > 0.5))
-            atomicAdd(sum, (double)output[i - 1]);
+            thread_sum = (double)output[i - 1];
+    }
+
+    // Reduce within warp
+    for (int offset = 16; offset > 0; offset /= 2)
+        thread_sum += __shfl_down_sync(0xffffffff, thread_sum, offset);
+
+    // First thread of each warp writes to shared memory
+    int warp_id = threadIdx.x / 32;
+    if (threadIdx.x % 32 == 0)
+        warp_sums[warp_id] = thread_sum;
+
+    __syncthreads();
+
+    // First thread sequentially computes the sums for all warps. I tried tree-based and warp-reduction. They didn't make any performance difference.
+    if (threadIdx.x == 0)
+    {
+        double block_sum = 0.0;
+        for (int j = 0; j < BLOCK_SIZE / 32; j++)
+            block_sum += warp_sums[j];
+        atomicAdd(sum, block_sum);
     }
 }
 
@@ -61,9 +82,11 @@ int main()
     cudaMalloc(&d_sum, sizeof(double));
 
     for (i = 0; i < N; i++)
+    {
         h_arr[i] = (float)rand() / RAND_MAX * 5.0f;
+    }
 
-    dim3 grid(N / BLOCK_SIZE);
+    dim3 grid(N / (BLOCK_SIZE));
     dim3 block(BLOCK_SIZE);
 
     cudaMemcpy(d_arr, h_arr, N * sizeof(float), cudaMemcpyHostToDevice);
