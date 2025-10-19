@@ -82,7 +82,7 @@ Peak Theoretical Bandwidth: 3.35TB/s
 
 ### Future Optimization Scope
 1. **NSight Compute**: I did not run this through NSight compute, but I'm sure it'd unlock some insights on bank-conflicts (I don't think there should be any, but good to double check) and register pressures.
-2. **AtomicAdd**: Currently, there's an `AtomicAdd` executed by 512k blocks, which happens directly on global memory. Writing a second kernel purely dedicated for reduction that can take these 512k block sums and add them up with warp-level and shared memory reduction can pretentially improve the performance further.
+2. **AtomicAdd**: Currently, there's an `AtomicAdd` executed by 512k blocks, which happens directly on global memory. Writing a second kernel purely dedicated for reduction that can take these 512k block sums and add them up with warp-level and shared memory reduction can potentially improve the performance further.
 2. **Cooperative Groups**: I did not explore CUDA's Cooperative Groups during this exercise. I believe the `AtomicAdd` could be optimized with Cooperative Groups.
-3. **Native BF16**: As I mentioned above, I convert BF16 to FP32 inside the kernel for compuation. Performing the computation in BF16.
+3. **Native BF16**: As I mentioned above, I convert BF16 to FP32 inside the kernel for compuation. Performing the computation in BF16 can improve performance.
 4. **CUDA Streams**: Since this exercise does not care about H2D and D2H times, I didn't use streams. However, in real-world, CUDA streams can speedup data transfer/overlap computation and communication to provide significant performance gains.
