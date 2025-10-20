@@ -47,7 +47,7 @@ I iteratively build up the kernel, one optimization at a time. The following are
 
 **Baseline Bandwidth**: `2` x `N` x `sizeof(float)` / `time_taken`  
 **Kernel Bandwidth**: `2.5` x `N` x `sizeof(float)` / `time_taken`  
-Please note that the kernel bandwidth takes into account an extra `0.5 x N` accss for the `i % 32 >= 16` terms.
+Please note that the kernel bandwidth takes into account an extra `0.5 x N` acccss for the `i % 32 >= 16` terms.
 
 ### Hardware Specs
 Device: NVIDIA H100  
@@ -65,6 +65,7 @@ Peak Theoretical Bandwidth: 3.35TB/s
 | 6_warp_reduction | 0.449ms | 1.368ms | 32.84% | 2390.26 GB/s | 981.40 GB/s | FP32 |
 | 7_vectorize | 0.448ms | 0.559ms | 80.09% | 2399.14 GB/s | 2401.96 GB/s | FP32 |
 | 8_final_fp32 | 0.447ms | 0.381ms | 117.46% | 2400.00 GB/s | 3523.74 GB/s * | FP32 |
+| 8.5_final_fp32_opt | 0.446ms | 0.376ms | 118.30% | 2404.82 GB/s | 3556.30 GB/s * | FP32 |
 | 9_bf16 | 0.372ms | 0.287ms | 129.47% | 1443.95 GB/s | 2336.92 GB/s * | BF16 |
 
 \* -> Note that these bandwidths are not purely for HBM, since we cache the `i-16` blocks. This bandwidth is higher than the theoretical HBM bandwidth for H100 because part of it comes from the shared memory.
@@ -78,11 +79,9 @@ Peak Theoretical Bandwidth: 3.35TB/s
 **6_warp_reduction**: Moved from shared memory based local reduction to warp-level reduction that uses registers for data-transfer between warps instead of shared memory. I still use shared memory for reduction between warps within a block. Again, tried warp-level reduction and tree-based reduction for this part, but it didn't result in any speedup so ended up using sequential summation.  
 **7_vectorize**: Since our problem is naturally blocked in nature (can process 32 elements in isolation), and since our memory access is already coalesced, using vectorized memory access adds a huge boost to the performance by making use of the whole bandwidth of the memory bus to reduce the number of cycles required for data access.  
 **8_final_fp32**: Finally, we can make some final tweaks which include, 1) Vectorized access for the `i-16` parts of the array. 2) Using faster math intrinsics (eg: `__sinf()` instead of `sinf()`) did not fail the precision requirements while maintaining speed. 3) Added shared memory caching for the `i-16` lookback. 4) Added `#pragma unroll` to enable scheduler optimizations internally.  
+**8.5_final_fp32_opt**: Profiled `8_final_fp32` and found 4-way bank conflicts. Fixed it using structure of arrays for caching in SHMEM.
 **9_bf16**: Theoretically, I can achieve higher performance on this since BF16 is half the data of FP32. But for simplicity, I convert BF16 to FP32 in the kernel for processing. Given more time, I could have written a native BF16 kernel that would have achieved the same Kernel Bandwidth as `8_final_fp32`.
 
 ### Future Optimization Scope
-1. **NSight Compute**: I did not run this through NSight compute, but I'm sure it'd unlock some insights on bank-conflicts (I don't think there should be any, but good to double check) and register pressures.
-2. **AtomicAdd**: Currently, there's an `AtomicAdd` executed by 512k blocks, which happens directly on global memory. Writing a second kernel purely dedicated for reduction that can take these 512k block sums and add them up with warp-level and shared memory reduction can potentially improve the performance further.
-2. **Cooperative Groups**: I did not explore CUDA's Cooperative Groups during this exercise. I believe the `AtomicAdd` could be optimized with Cooperative Groups.
-3. **Native BF16**: As I mentioned above, I convert BF16 to FP32 inside the kernel for compuation. Performing the computation in BF16 can improve performance.
-4. **CUDA Streams**: Since this exercise does not care about H2D and D2H times, I didn't use streams. However, in real-world, CUDA streams can speedup data transfer/overlap computation and communication to provide significant performance gains.
+1. **Cooperative Groups**: I did not explore CUDA's Cooperative Groups during this exercise. I believe the `AtomicAdd` could be optimized with Cooperative Groups.
+2. **CUDA Streams**: Since this exercise does not care about H2D and D2H times, I didn't use streams. However, in real-world, CUDA streams can speedup data transfer/overlap computation and communication to provide significant performance gains.
