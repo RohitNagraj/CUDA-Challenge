@@ -11,40 +11,29 @@ __global__ void transform(float *arr, float *output, double *sum)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int i = tid * 4; // Each thread processes 4 elements
-    
+
     double thread_sum = 0.0;
     __shared__ double warp_sums[BLOCK_SIZE / 32];
-    __shared__ float cache[BLOCK_SIZE * 4 + 16];
-
-    // Load previous 16 elements into shared memory (with bounds checking)
-    if (threadIdx.x < 4) {
-        int offset = blockIdx.x * BLOCK_SIZE * 4 - 16 + threadIdx.x * 4;
-        if (offset >= 0 && offset + 3 < N) {
-            *reinterpret_cast<float4*>(&cache[threadIdx.x * 4]) = 
-                *reinterpret_cast<float4*>(&arr[offset]);
-        }
-    }
+    __shared__ float cache[BLOCK_SIZE * 4];
 
     // Load main data into shared memory
-    if (i + 3 < N) {
-        *reinterpret_cast<float4*>(&cache[16 + threadIdx.x * 4]) = 
-            *reinterpret_cast<float4*>(&arr[i]);
-    }
-    
+    if (i + 3 < N)
+        *reinterpret_cast<float4 *>(&cache[threadIdx.x * 4]) = *reinterpret_cast<float4 *>(&arr[i]);
+
     __syncthreads();
 
     if (i + 3 < N)
     {
         float4 output_vec;
-        
-        #pragma unroll
+        bool first_block = ((i & 31) < 16);
+
+#pragma unroll
         for (int j = 0; j < 4; j++)
         {
             int idx = i + j;
-            float xi = cache[16 + threadIdx.x * 4 + j];
-            int mod4 = (idx & 3);
-            bool first_block = ((idx & 31) < 16);
-            
+            float xi = cache[threadIdx.x * 4 + j];
+            int mod4 = j;
+
             float result;
             if (mod4 == 0)
                 result = __sinf(xi);
@@ -54,12 +43,12 @@ __global__ void transform(float *arr, float *output, double *sum)
                 result = __logf(xi);
             else
                 result = __expf(xi);
-            
+
             if (!first_block)
             {
-                float ximinus16 = cache[threadIdx.x * 4 + j];
+                float ximinus16 = cache[threadIdx.x * 4 + j - 16];
                 float prev_result;
-                
+
                 if (mod4 == 0)
                     prev_result = __sinf(ximinus16);
                 else if (mod4 == 1)
@@ -68,34 +57,23 @@ __global__ void transform(float *arr, float *output, double *sum)
                     prev_result = __logf(ximinus16);
                 else
                     prev_result = __expf(ximinus16);
-                
+
                 result *= prev_result;
             }
-            
-            ((float*)&output_vec)[j] = result;
+
+            ((float *)&output_vec)[j] = result;
         }
-        
+
         // Store 4 floats at once using float4
-        *reinterpret_cast<float4*>(&output[i]) = output_vec;
-        
+        *reinterpret_cast<float4 *>(&output[i]) = output_vec;
+
         // Now accumulate for sum (when idx % 4 == 1 and result > 0.5)
-        #pragma unroll
-        for (int j = 0; j < 4; j++)
-        {
-            int idx = i + j;
-            if ((idx % 4 == 1) && (((float*)&output_vec)[j] > 0.5f))
-            {
-                if (j > 0) {
-                    thread_sum += (double)((float*)&output_vec)[j - 1];
-                } else if (idx > 0) {
-                    thread_sum += (double)output[idx - 1];
-                }
-            }
-        }
+        if (((float *)&output_vec)[1] > 0.5f)
+            thread_sum = (double)((float *)&output_vec)[0];
     }
 
-    // Reduce within warp using shuffle
-    #pragma unroll
+// Reduce within warp using shuffle
+#pragma unroll
     for (int offset = 16; offset > 0; offset /= 2)
         thread_sum += __shfl_down_sync(0xffffffff, thread_sum, offset);
 
@@ -110,10 +88,10 @@ __global__ void transform(float *arr, float *output, double *sum)
     if (threadIdx.x == 0)
     {
         double block_sum = 0.0;
-        #pragma unroll
+#pragma unroll
         for (int j = 0; j < BLOCK_SIZE / 32; j++)
             block_sum += warp_sums[j];
-        
+
         if (block_sum != 0.0)
             atomicAdd(sum, block_sum);
     }
@@ -155,8 +133,8 @@ int main()
     }
 
     // Each thread processes 4 elements, so divide grid size by 4
-    dim3 grid(N / (BLOCK_SIZE * 4));
-    dim3 block(BLOCK_SIZE);
+    dim3 grid(N / (BLOCK_SIZE * 4)); // 2 ^ 27 / (1024) = 128k
+    dim3 block(BLOCK_SIZE);          // 256
 
     cudaMemcpy(d_arr, h_arr, N * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_sum, &h_sum, sizeof(double), cudaMemcpyHostToDevice);
@@ -189,48 +167,48 @@ int main()
                 correct = false;
                 printf("Expected: %f, Got: %f at index: %d\n", sinf(h_arr[i]), h_output[i], i);
             }
-        else if ((i % 4 == 1) && (i % 32 < 16))
-            if (fabsf(h_output[i] - cosf(h_arr[i])) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", cosf(h_arr[i]), h_output[i], i);
-            }
-        else if ((i % 4 == 2) && (i % 32 < 16))
-            if (fabsf(h_output[i] - logf(h_arr[i])) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", logf(h_arr[i]), h_output[i], i);
-            }
-        else if ((i % 4 == 3) && (i % 32 < 16))
-            if (fabsf(h_output[i] - expf(h_arr[i])) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", expf(h_arr[i]), h_output[i], i);
-            }
-        else if ((i % 4 == 0) && (i % 32 >= 16))
-            if (fabsf(h_output[i] - (sinf(h_arr[i]) * sinf(h_arr[i - 16]))) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", (sinf(h_arr[i]) * sinf(h_arr[i - 16])), h_output[i], i);
-            }
-        else if ((i % 4 == 1) && (i % 32 >= 16))
-            if (fabsf(h_output[i] - (cosf(h_arr[i]) * cosf(h_arr[i - 16]))) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", (cosf(h_arr[i]) * cosf(h_arr[i - 16])), h_output[i], i);
-            }
-        else if ((i % 4 == 2) && (i % 32 >= 16))
-            if (fabsf(h_output[i] - (logf(h_arr[i]) * logf(h_arr[i - 16]))) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", (logf(h_arr[i]) * logf(h_arr[i - 16])), h_output[i], i);
-            }
-        else if ((i % 4 == 3) && (i % 32 >= 16))
-            if (fabsf(h_output[i] - (expf(h_arr[i]) * expf(h_arr[i - 16]))) > DELTA)
-            {
-                correct = false;
-                printf("Expected: %f, Got: %f at index: %d\n", (expf(h_arr[i]) * expf(h_arr[i - 16])), h_output[i], i);
-            }
+            else if ((i % 4 == 1) && (i % 32 < 16))
+                if (fabsf(h_output[i] - cosf(h_arr[i])) > DELTA)
+                {
+                    correct = false;
+                    printf("Expected: %f, Got: %f at index: %d\n", cosf(h_arr[i]), h_output[i], i);
+                }
+                else if ((i % 4 == 2) && (i % 32 < 16))
+                    if (fabsf(h_output[i] - logf(h_arr[i])) > DELTA)
+                    {
+                        correct = false;
+                        printf("Expected: %f, Got: %f at index: %d\n", logf(h_arr[i]), h_output[i], i);
+                    }
+                    else if ((i % 4 == 3) && (i % 32 < 16))
+                        if (fabsf(h_output[i] - expf(h_arr[i])) > DELTA)
+                        {
+                            correct = false;
+                            printf("Expected: %f, Got: %f at index: %d\n", expf(h_arr[i]), h_output[i], i);
+                        }
+                        else if ((i % 4 == 0) && (i % 32 >= 16))
+                            if (fabsf(h_output[i] - (sinf(h_arr[i]) * sinf(h_arr[i - 16]))) > DELTA)
+                            {
+                                correct = false;
+                                printf("Expected: %f, Got: %f at index: %d\n", (sinf(h_arr[i]) * sinf(h_arr[i - 16])), h_output[i], i);
+                            }
+                            else if ((i % 4 == 1) && (i % 32 >= 16))
+                                if (fabsf(h_output[i] - (cosf(h_arr[i]) * cosf(h_arr[i - 16]))) > DELTA)
+                                {
+                                    correct = false;
+                                    printf("Expected: %f, Got: %f at index: %d\n", (cosf(h_arr[i]) * cosf(h_arr[i - 16])), h_output[i], i);
+                                }
+                                else if ((i % 4 == 2) && (i % 32 >= 16))
+                                    if (fabsf(h_output[i] - (logf(h_arr[i]) * logf(h_arr[i - 16]))) > DELTA)
+                                    {
+                                        correct = false;
+                                        printf("Expected: %f, Got: %f at index: %d\n", (logf(h_arr[i]) * logf(h_arr[i - 16])), h_output[i], i);
+                                    }
+                                    else if ((i % 4 == 3) && (i % 32 >= 16))
+                                        if (fabsf(h_output[i] - (expf(h_arr[i]) * expf(h_arr[i - 16]))) > DELTA)
+                                        {
+                                            correct = false;
+                                            printf("Expected: %f, Got: %f at index: %d\n", (expf(h_arr[i]) * expf(h_arr[i - 16])), h_output[i], i);
+                                        }
     }
     if (!correct)
         printf("CORRECTNESS TEST FAILED!\n");
