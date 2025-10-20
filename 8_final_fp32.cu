@@ -30,7 +30,6 @@ __global__ void transform(float *arr, float *output, double *sum)
 #pragma unroll
         for (int j = 0; j < 4; j++)
         {
-            int idx = i + j;
             float xi = cache[threadIdx.x * 4 + j];
             int mod4 = j;
 
