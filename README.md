@@ -2,11 +2,11 @@
 
 ## Final Submission
 **Github URL**: https://github.com/RohitNagraj/CUDA-Challenge  
-**FP32**: [8_final_fp32.cu](https://github.com/RohitNagraj/CUDA-Challenge/blob/main/8_final_fp32.cu)  
+**FP32**: [8.5_final_fp32_opt.cu](https://github.com/RohitNagraj/CUDA-Challenge/blob/main/8.5_final_fp32_opt.cu)  
 **BF16**: [9_bf16.cu](https://github.com/RohitNagraj/CUDA-Challenge/blob/main/9_bf16.cu)  
 | Program | Baseline Execution Time | Kernel Execution Time | Speedup | Baseline Bandwidth | Kernel Bandwidth | DType |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 8_final_fp32 | 0.447ms | 0.381ms | 117.46% | 2400.00 GB/s | 3523.74 GB/s * | FP32 |
+| 8.5_final_fp32_opt | 0.446ms | 0.376ms | 118.30% | 2404.82 GB/s | 3556.30 GB/s * | FP32 |
 | 9_bf16 | 0.372ms | 0.287ms | 129.47% | 1443.95 GB/s | 2336.92 GB/s * | BF16 |
 
 \* -> Note that these bandwidths are not purely for HBM, since we cache the `i-16` blocks. This bandwidth is higher than the theoretical HBM bandwidth for H100 because part of it comes from the shared memory.
