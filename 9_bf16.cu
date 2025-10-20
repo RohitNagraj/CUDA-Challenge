@@ -15,24 +15,13 @@ __global__ void transform(__nv_bfloat16 *arr, __nv_bfloat16 *output, float *sum)
     
     float thread_sum = 0.0f;
     __shared__ float warp_sums[BLOCK_SIZE / 32];
-    __shared__ __nv_bfloat16 cache[BLOCK_SIZE * 4 + 16];
-
-    // Load previous 16 elements into shared memory (with bounds checking)
-    if (threadIdx.x < 4) {
-        int offset = blockIdx.x * BLOCK_SIZE * 4 - 16 + threadIdx.x * 4;
-        if (offset >= 0 && offset + 3 < N) {
-            #pragma unroll
-            for (int k = 0; k < 4; k++) {
-                cache[threadIdx.x * 4 + k] = arr[offset + k];
-            }
-        }
-    }
+    __shared__ __nv_bfloat16 cache[BLOCK_SIZE * 4];
 
     // Load main data into shared memory
     if (i + 3 < N) {
         #pragma unroll
         for (int k = 0; k < 4; k++) {
-            cache[16 + threadIdx.x * 4 + k] = arr[i + k];
+            cache[threadIdx.x * 4 + k] = arr[i + k];
         }
     }
     
@@ -46,7 +35,7 @@ __global__ void transform(__nv_bfloat16 *arr, __nv_bfloat16 *output, float *sum)
         for (int j = 0; j < 4; j++)
         {
             int idx = i + j;
-            float xi = __bfloat162float(cache[16 + threadIdx.x * 4 + j]);
+            float xi = __bfloat162float(cache[threadIdx.x * 4 + j]);
             int mod4 = (idx & 3);
             bool first_block = ((idx & 31) < 16);
             
@@ -64,7 +53,7 @@ __global__ void transform(__nv_bfloat16 *arr, __nv_bfloat16 *output, float *sum)
             // Apply multiplication for second half of 32-element blocks
             if (!first_block)
             {
-                float ximinus16 = __bfloat162float(cache[threadIdx.x * 4 + j]);
+                float ximinus16 = __bfloat162float(cache[threadIdx.x * 4 + j - 16]);
                 float prev_result;
                 
                 if (mod4 == 0)
