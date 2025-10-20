@@ -167,48 +167,48 @@ int main()
                 correct = false;
                 printf("Expected: %f, Got: %f at index: %d\n", sinf(h_arr[i]), h_output[i], i);
             }
-            else if ((i % 4 == 1) && (i % 32 < 16))
-                if (fabsf(h_output[i] - cosf(h_arr[i])) > DELTA)
-                {
-                    correct = false;
-                    printf("Expected: %f, Got: %f at index: %d\n", cosf(h_arr[i]), h_output[i], i);
-                }
-                else if ((i % 4 == 2) && (i % 32 < 16))
-                    if (fabsf(h_output[i] - logf(h_arr[i])) > DELTA)
-                    {
-                        correct = false;
-                        printf("Expected: %f, Got: %f at index: %d\n", logf(h_arr[i]), h_output[i], i);
-                    }
-                    else if ((i % 4 == 3) && (i % 32 < 16))
-                        if (fabsf(h_output[i] - expf(h_arr[i])) > DELTA)
-                        {
-                            correct = false;
-                            printf("Expected: %f, Got: %f at index: %d\n", expf(h_arr[i]), h_output[i], i);
-                        }
-                        else if ((i % 4 == 0) && (i % 32 >= 16))
-                            if (fabsf(h_output[i] - (sinf(h_arr[i]) * sinf(h_arr[i - 16]))) > DELTA)
-                            {
-                                correct = false;
-                                printf("Expected: %f, Got: %f at index: %d\n", (sinf(h_arr[i]) * sinf(h_arr[i - 16])), h_output[i], i);
-                            }
-                            else if ((i % 4 == 1) && (i % 32 >= 16))
-                                if (fabsf(h_output[i] - (cosf(h_arr[i]) * cosf(h_arr[i - 16]))) > DELTA)
-                                {
-                                    correct = false;
-                                    printf("Expected: %f, Got: %f at index: %d\n", (cosf(h_arr[i]) * cosf(h_arr[i - 16])), h_output[i], i);
-                                }
-                                else if ((i % 4 == 2) && (i % 32 >= 16))
-                                    if (fabsf(h_output[i] - (logf(h_arr[i]) * logf(h_arr[i - 16]))) > DELTA)
-                                    {
-                                        correct = false;
-                                        printf("Expected: %f, Got: %f at index: %d\n", (logf(h_arr[i]) * logf(h_arr[i - 16])), h_output[i], i);
-                                    }
-                                    else if ((i % 4 == 3) && (i % 32 >= 16))
-                                        if (fabsf(h_output[i] - (expf(h_arr[i]) * expf(h_arr[i - 16]))) > DELTA)
-                                        {
-                                            correct = false;
-                                            printf("Expected: %f, Got: %f at index: %d\n", (expf(h_arr[i]) * expf(h_arr[i - 16])), h_output[i], i);
-                                        }
+        else if ((i % 4 == 1) && (i % 32 < 16))
+            if (fabsf(h_output[i] - cosf(h_arr[i])) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", cosf(h_arr[i]), h_output[i], i);
+            }
+        else if ((i % 4 == 2) && (i % 32 < 16))
+            if (fabsf(h_output[i] - logf(h_arr[i])) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", logf(h_arr[i]), h_output[i], i);
+            }
+        else if ((i % 4 == 3) && (i % 32 < 16))
+            if (fabsf(h_output[i] - expf(h_arr[i])) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", expf(h_arr[i]), h_output[i], i);
+            }
+        else if ((i % 4 == 0) && (i % 32 >= 16))
+            if (fabsf(h_output[i] - (sinf(h_arr[i]) * sinf(h_arr[i - 16]))) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", (sinf(h_arr[i]) * sinf(h_arr[i - 16])), h_output[i], i);
+            }
+        else if ((i % 4 == 1) && (i % 32 >= 16))
+            if (fabsf(h_output[i] - (cosf(h_arr[i]) * cosf(h_arr[i - 16]))) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", (cosf(h_arr[i]) * cosf(h_arr[i - 16])), h_output[i], i);
+            }
+        else if ((i % 4 == 2) && (i % 32 >= 16))
+            if (fabsf(h_output[i] - (logf(h_arr[i]) * logf(h_arr[i - 16]))) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", (logf(h_arr[i]) * logf(h_arr[i - 16])), h_output[i], i);
+            }
+        else if ((i % 4 == 3) && (i % 32 >= 16))
+            if (fabsf(h_output[i] - (expf(h_arr[i]) * expf(h_arr[i - 16]))) > DELTA)
+            {
+                correct = false;
+                printf("Expected: %f, Got: %f at index: %d\n", (expf(h_arr[i]) * expf(h_arr[i - 16])), h_output[i], i);
+            }
     }
     if (!correct)
         printf("CORRECTNESS TEST FAILED!\n");
